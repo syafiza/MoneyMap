@@ -26,6 +26,7 @@
 #include <Include\PartialCloseManager.mqh>
 #include <Include\DrawdownManager.mqh>
 #include <Include\PerformanceTracker.mqh>
+#include <Include\LatencyMonitor.mqh>
 
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
@@ -92,6 +93,9 @@ CPerformanceTracker*  g_performance;            // Performance tracker
 
 MqlTick               g_lastTick;               // Last tick data
 MqlRates              g_rates[];                // Rate data
+
+// Performance optimization
+datetime              g_lastBarTime = 0;        // Last bar time for caching
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
@@ -258,10 +262,11 @@ void OnTick()
 
 //+------------------------------------------------------------------+
 //| Get market data (tick, rates, indicators)                        |
+//| OPTIMIZED: Updates indicators only on new bar formation          |
 //+------------------------------------------------------------------+
 bool GetMarketData()
 {
-    // Get tick data
+    // Get tick data (always needed)
     if(!SymbolInfoTick(_Symbol, g_lastTick))
     {
         Print("ERROR: Failed to get tick data");
@@ -275,13 +280,25 @@ bool GetMarketData()
         return false;
     }
     
-    // Update SMA
-    if(!g_sma.Update(3))
-        return false;
+    // Indicator caching: Update only on new bar formation
+    datetime currentBarTime = iTime(_Symbol, _Period, 0);
     
-    // Update ATR
-    if(!g_atrRiskManager.Update())
-        return false;
+    if(currentBarTime != g_lastBarTime)
+    {
+        // New bar formed - update indicators
+        g_lastBarTime = currentBarTime;
+        
+        // Update SMA
+        if(!g_sma.Update(3))
+            return false;
+        
+        // Update ATR
+        if(!g_atrRiskManager.Update())
+            return false;
+        
+        // Indicators updated (happens ~240 times per day on M5)
+    }
+    // Else: Use cached indicator values (happens thousands of times per day)
     
     return true;
 }
